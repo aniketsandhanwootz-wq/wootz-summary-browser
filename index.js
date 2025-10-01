@@ -307,6 +307,7 @@ For example, if there are any blindspots that we are missing or repeating any mi
 * **No fluff**: Every sentence should add value
 * **Highlight patterns**: If multiple check-ins show the same issue (e.g., paint defects), group them
 * **Call out blockers**: Clearly identify what's stopping progress (payments, approvals, quality issues)
+* When working on threats you could also take into account any upcoming holidays before dispatch date which could delay timelines. Think in terms of ground possible ground challenges also
 
 **DATA FOCUS:**
 * Recent updates matter most for schedule assessment
