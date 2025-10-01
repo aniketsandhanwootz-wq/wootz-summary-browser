@@ -128,13 +128,13 @@ async function saveSummary(projectId, summary, keyChanges, previousContext, allD
 
 // Dynamic function to build project status from any parameters
 function buildProjectStatus(params) {
-  // Exclude system parameters
-  const excludeParams = ['projectId', 'projectid'];
+  // Exclude system parameters (all ID variations)
+  const excludeParams = ['projectid', 'projectId', 'ProjectID', 'rowid', 'rowId', 'RowID', 'row_id'];
   const statusLines = [];
   
   // Convert all parameters to readable format
   for (const [key, value] of Object.entries(params)) {
-    if (!excludeParams.includes(key.toLowerCase()) && value) {
+    if (!excludeParams.includes(key) && !excludeParams.includes(key.toLowerCase()) && value) {
       // Convert camelCase or snake_case to readable format
       const readableKey = key
         .replace(/([A-Z])/g, ' $1')
@@ -161,15 +161,21 @@ app.get('/generate-summary', async (req, res) => {
     console.log('🚀 New summary request received');
     console.log('📥 Parameters:', JSON.stringify(req.query, null, 2));
     
-    // Get projectId (case-insensitive)
-    const projectId = req.query.projectId || req.query.projectid || req.query.ProjectID;
+    // Get projectId - accept multiple variations including Row ID
+    const projectId = req.query.projectId || 
+                      req.query.projectid || 
+                      req.query.ProjectID || 
+                      req.query.rowID || 
+                      req.query.RowID ||
+                      req.query.rowId ||
+                      req.query.row_id;
     
     if (!projectId) {
-      console.log('❌ Missing projectId');
+      console.log('❌ Missing projectId/rowId');
       return res.status(400).json({ 
         success: false,
-        error: 'ProjectID is required',
-        hint: 'Add ?projectId=YOUR_PROJECT_ID to the URL'
+        error: 'ProjectID or RowID is required',
+        hint: 'Add ?projectId=YOUR_ID or ?rowID=YOUR_ID to the URL'
       });
     }
     
@@ -313,7 +319,7 @@ app.get('/health', async (req, res) => {
         googleSheets: sheetConnected ? '✅ Connected' : '❌ Failed',
         openAI: openaiConnected ? '✅ Configured' : '❌ Not configured'
       },
-      version: '2.0.0'
+      version: '2.1.0'
     });
   } catch (error) {
     res.status(500).json({
@@ -328,14 +334,15 @@ app.get('/health', async (req, res) => {
 app.get('/', (req, res) => {
   res.json({ 
     message: '🚀 Wootz Summary API is running',
-    version: '2.0.0',
+    version: '2.1.0',
     endpoints: {
       generateSummary: {
         path: '/generate-summary',
         method: 'GET',
-        requiredParams: ['projectId'],
+        requiredParams: ['projectId or rowID'],
         optionalParams: 'Any additional parameters (flexible)',
-        example: '/generate-summary?projectId=PROJ123&drawings=Approved&materials=80%25&process=Machining&status=In%20Progress'
+        example: '/generate-summary?projectId=PROJ123&drawings=Approved&materials=80%25&process=Machining&status=In%20Progress',
+        glideExample: '/generate-summary?rowID={{Row ID}}&status={{Status}}&notes={{Notes}}'
       },
       health: {
         path: '/health',
@@ -343,7 +350,7 @@ app.get('/', (req, res) => {
         description: 'Check API health and connections'
       }
     },
-    documentation: 'Add any query parameters to describe project status. The API will dynamically process them.',
+    documentation: 'Add any query parameters to describe project status. The API will dynamically process them. Accepts both projectId and rowID as identifiers.',
     timestamp: new Date().toISOString()
   });
 });
@@ -371,7 +378,7 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`
 ╔═══════════════════════════════════════╗
-║   🚀 Wootz Summary API v2.0.0         ║
+║   🚀 Wootz Summary API v2.1.0         ║
 ║   📡 Server running on port ${PORT}       ║
 ║   🌐 Environment: ${process.env.NODE_ENV || 'production'}      ║
 ╚═══════════════════════════════════════╝
