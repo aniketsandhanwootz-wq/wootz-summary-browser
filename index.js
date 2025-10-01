@@ -73,7 +73,7 @@ async function getPreviousSummaries(projectId, limit = 5) {
     return projectRows;
   } catch (error) {
     console.error('❌ Error fetching previous summaries:', error.message);
-    return []; // Return empty array on error, don't fail the whole request
+    return [];
   }
 }
 
@@ -99,11 +99,10 @@ async function saveSummary(projectId, summary, keyChanges, previousContext, allD
     return true;
   } catch (error) {
     console.error('❌ Error saving summary:', error.message);
-    // Retry once after 2 seconds
     try {
       console.log('🔄 Retrying save operation...');
       await new Promise(resolve => setTimeout(resolve, 2000));
-      sheetDoc = null; // Reset connection
+      sheetDoc = null;
       const doc = await getSheetDoc();
       const sheet = doc.sheetsByIndex[0];
       const dataSnapshot = JSON.stringify(allData);
@@ -128,14 +127,11 @@ async function saveSummary(projectId, summary, keyChanges, previousContext, allD
 
 // Dynamic function to build project status from any parameters
 function buildProjectStatus(params) {
-  // Exclude system parameters (all ID variations)
-  const excludeParams = ['projectid', 'projectId', 'ProjectID', 'rowid', 'rowId', 'RowID', 'row_id'];
+  const excludeParams = ['projectid', 'projectId', 'ProjectID', 'rowid', 'rowId', 'RowID', 'row_id', 'Row ID'];
   const statusLines = [];
   
-  // Convert all parameters to readable format
   for (const [key, value] of Object.entries(params)) {
     if (!excludeParams.includes(key) && !excludeParams.includes(key.toLowerCase()) && value) {
-      // Convert camelCase or snake_case to readable format
       const readableKey = key
         .replace(/([A-Z])/g, ' $1')
         .replace(/_/g, ' ')
@@ -153,50 +149,47 @@ function buildProjectStatus(params) {
     : '- No specific details provided';
 }
 
-// Main endpoint - Dynamic and flexible
-app.get('/generate-summary', async (req, res) => {
-  const startTime = Date.now();
+// Core logic function (shared between GET and POST)
+async function generateSummaryLogic(data, startTime) {
+  // Get projectId from various possible field names
+  const projectId = data.projectId || 
+                    data.projectid || 
+                    data.ProjectID || 
+                    data.rowID || 
+                    data.RowID ||
+                    data.rowId ||
+                    data.row_id ||
+                    data['Row ID'];
   
-  try {
-    console.log('🚀 New summary request received');
-    console.log('📥 Parameters:', JSON.stringify(req.query, null, 2));
-    
-    // Get projectId - accept multiple variations including Row ID
-    const projectId = req.query.projectId || 
-                      req.query.projectid || 
-                      req.query.ProjectID || 
-                      req.query.rowID || 
-                      req.query.RowID ||
-                      req.query.rowId ||
-                      req.query.row_id ||
-                      req.query['Row ID'];
-    
-    if (!projectId) {
-      console.log('❌ Missing projectId/rowId');
-      return res.status(400).json({ 
+  if (!projectId) {
+    console.log('❌ Missing projectId/rowId');
+    return {
+      status: 400,
+      response: { 
         success: false,
         error: 'ProjectID or RowID is required',
-        hint: 'Add ?projectId=YOUR_ID or ?rowID=YOUR_ID to the URL'
-      });
-    }
-    
-    // Build dynamic project status from all parameters
-    const projectStatus = buildProjectStatus(req.query);
-    
-    // Get previous summaries
-    const previousSummaries = await getPreviousSummaries(projectId, 5);
-    
-    // Build previous context
-    let previousContext = 'No previous history available.';
-    if (previousSummaries.length > 0) {
-      previousContext = previousSummaries.map((s, i) => {
-        const daysAgo = previousSummaries.length - i;
-        return `📅 Day -${daysAgo} (${s.timestamp}):\n${s.summary}`;
-      }).join('\n\n');
-    }
-    
-    // Create dynamic prompt
-    const prompt = `You are analyzing a manufacturing project for Wootz company. Generate a concise summary in Hindi-English mix (Hinglish) that managers can quickly understand.
+        hint: 'Include projectId or rowID in request'
+      }
+    };
+  }
+  
+  // Build dynamic project status
+  const projectStatus = buildProjectStatus(data);
+  
+  // Get previous summaries
+  const previousSummaries = await getPreviousSummaries(projectId, 5);
+  
+  // Build previous context
+  let previousContext = 'No previous history available.';
+  if (previousSummaries.length > 0) {
+    previousContext = previousSummaries.map((s, i) => {
+      const daysAgo = previousSummaries.length - i;
+      return `📅 Day -${daysAgo} (${s.timestamp}):\n${s.summary}`;
+    }).join('\n\n');
+  }
+  
+  // Create dynamic prompt
+  const prompt = `You are analyzing a manufacturing project for Wootz company. Generate a concise summary in Hindi-English mix (Hinglish) that managers can quickly understand.
 
 📊 PROJECT: ${projectId}
 
@@ -222,57 +215,58 @@ Style Guidelines:
 
 Generate the summary now:`;
 
-    console.log('🤖 Calling OpenAI API...');
-    
-    // Call OpenAI with timeout and error handling
-    const completion = await Promise.race([
-      openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.7,
-        max_tokens: 600
-      }),
-      new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('OpenAI API timeout')), 30000)
+  console.log('🤖 Calling OpenAI API...');
+  
+  // Call OpenAI with timeout
+  const completion = await Promise.race([
+    openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.7,
+      max_tokens: 600
+    }),
+    new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('OpenAI API timeout')), 30000)
+    )
+  ]);
+  
+  const summary = completion.choices[0].message.content;
+  console.log('✅ Summary generated successfully');
+  
+  // Extract key changes
+  const keyChangesKeywords = [
+    'Progress', 'Changed', 'New', 'Updated', 'Completed', 
+    'Started', 'Received', 'Approved', 'Issue', 'Blocker',
+    'प्रगति', 'बदलाव', 'नया', 'पूरा'
+  ];
+  
+  const keyChanges = summary
+    .split('\n')
+    .filter(line => 
+      keyChangesKeywords.some(keyword => 
+        line.toLowerCase().includes(keyword.toLowerCase())
       )
-    ]);
-    
-    const summary = completion.choices[0].message.content;
-    console.log('✅ Summary generated successfully');
-    
-    // Extract key changes intelligently
-    const keyChangesKeywords = [
-      'Progress', 'Changed', 'New', 'Updated', 'Completed', 
-      'Started', 'Received', 'Approved', 'Issue', 'Blocker',
-      'प्रगति', 'बदलाव', 'नया', 'पूरा'
-    ];
-    
-    const keyChanges = summary
-      .split('\n')
-      .filter(line => 
-        keyChangesKeywords.some(keyword => 
-          line.toLowerCase().includes(keyword.toLowerCase())
-        )
-      )
-      .map(line => line.replace(/^[•\-*]\s*/, '').trim())
-      .filter(line => line.length > 10)
-      .slice(0, 3)
-      .join(' | ') || 'No major changes detected';
-    
-    // Save to Google Sheets
-    const saveSuccess = await saveSummary(
-      projectId, 
-      summary, 
-      keyChanges, 
-      previousContext,
-      req.query // Save all input data
-    );
-    
-    const executionTime = Date.now() - startTime;
-    console.log(`⏱️ Total execution time: ${executionTime}ms`);
-    
-    // Return comprehensive response
-    res.json({
+    )
+    .map(line => line.replace(/^[•\-*]\s*/, '').trim())
+    .filter(line => line.length > 10)
+    .slice(0, 3)
+    .join(' | ') || 'No major changes detected';
+  
+  // Save to Google Sheets
+  const saveSuccess = await saveSummary(
+    projectId, 
+    summary, 
+    keyChanges, 
+    previousContext,
+    data
+  );
+  
+  const executionTime = Date.now() - startTime;
+  console.log(`⏱️ Total execution time: ${executionTime}ms`);
+  
+  return {
+    status: 200,
+    response: {
       success: true,
       projectId: projectId,
       summary: summary,
@@ -283,11 +277,23 @@ Generate the summary now:`;
         executionTimeMs: executionTime,
         timestamp: new Date().toISOString()
       }
-    });
+    }
+  };
+}
+
+// GET endpoint (for browser/Open Link)
+app.get('/generate-summary', async (req, res) => {
+  const startTime = Date.now();
+  
+  try {
+    console.log('🚀 GET request received');
+    console.log('📥 Query params:', JSON.stringify(req.query, null, 2));
+    
+    const result = await generateSummaryLogic(req.query, startTime);
+    return res.status(result.status).json(result.response);
     
   } catch (error) {
-    console.error('❌ Error in generate-summary:', error);
-    
+    console.error('❌ Error in GET /generate-summary:', error);
     const executionTime = Date.now() - startTime;
     
     res.status(500).json({ 
@@ -302,14 +308,38 @@ Generate the summary now:`;
   }
 });
 
-// Health check endpoint with detailed status
+// POST endpoint (for Glide webhook)
+app.post('/generate-summary', async (req, res) => {
+  const startTime = Date.now();
+  
+  try {
+    console.log('🚀 POST request received (webhook)');
+    console.log('📥 Request body:', JSON.stringify(req.body, null, 2));
+    
+    const result = await generateSummaryLogic(req.body, startTime);
+    return res.status(result.status).json(result.response);
+    
+  } catch (error) {
+    console.error('❌ Error in POST /generate-summary:', error);
+    const executionTime = Date.now() - startTime;
+    
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to generate summary',
+      details: error.message,
+      metadata: {
+        executionTimeMs: executionTime,
+        timestamp: new Date().toISOString()
+      }
+    });
+  }
+});
+
+// Health check endpoint
 app.get('/health', async (req, res) => {
   try {
-    // Test sheet connection
     const doc = await getSheetDoc();
     const sheetConnected = !!doc;
-    
-    // Test OpenAI (simple check)
     const openaiConnected = !!OPENAI_API_KEY && OPENAI_API_KEY.startsWith('sk-');
     
     res.json({ 
@@ -320,7 +350,7 @@ app.get('/health', async (req, res) => {
         googleSheets: sheetConnected ? '✅ Connected' : '❌ Failed',
         openAI: openaiConnected ? '✅ Configured' : '❌ Not configured'
       },
-      version: '2.1.0'
+      version: '2.2.0'
     });
   } catch (error) {
     res.status(500).json({
@@ -331,19 +361,20 @@ app.get('/health', async (req, res) => {
   }
 });
 
-// Root endpoint with API documentation
+// Root endpoint
 app.get('/', (req, res) => {
   res.json({ 
     message: '🚀 Wootz Summary API is running',
-    version: '2.1.0',
+    version: '2.2.0',
     endpoints: {
       generateSummary: {
         path: '/generate-summary',
-        method: 'GET',
+        methods: ['GET', 'POST'],
         requiredParams: ['projectId or rowID'],
         optionalParams: 'Any additional parameters (flexible)',
-        example: '/generate-summary?projectId=PROJ123&drawings=Approved&materials=80%25&process=Machining&status=In%20Progress',
-        glideExample: '/generate-summary?rowID={{Row ID}}&status={{Status}}&notes={{Notes}}'
+        getExample: 'GET /generate-summary?rowID=123&status=Testing',
+        postExample: 'POST /generate-summary with JSON body: {"rowID": "123", "status": "Testing"}',
+        glideWebhook: 'Use POST method, add fields to request body'
       },
       health: {
         path: '/health',
@@ -351,7 +382,7 @@ app.get('/', (req, res) => {
         description: 'Check API health and connections'
       }
     },
-    documentation: 'Add any query parameters to describe project status. The API will dynamically process them. Accepts both projectId and rowID as identifiers.',
+    documentation: 'Supports both GET (URL params) and POST (request body). Perfect for Glide webhooks.',
     timestamp: new Date().toISOString()
   });
 });
@@ -360,7 +391,7 @@ app.get('/', (req, res) => {
 app.use((req, res) => {
   res.status(404).json({
     error: 'Endpoint not found',
-    availableEndpoints: ['/', '/health', '/generate-summary'],
+    availableEndpoints: ['/', '/health', '/generate-summary (GET/POST)'],
     hint: 'Check the root endpoint (/) for API documentation'
   });
 });
@@ -379,9 +410,10 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`
 ╔═══════════════════════════════════════╗
-║   🚀 Wootz Summary API v2.1.0         ║
+║   🚀 Wootz Summary API v2.2.0         ║
 ║   📡 Server running on port ${PORT}       ║
 ║   🌐 Environment: ${process.env.NODE_ENV || 'production'}      ║
+║   🔄 Supports GET & POST requests     ║
 ╚═══════════════════════════════════════╝
   `);
   console.log(`✅ Ready to accept requests!`);
