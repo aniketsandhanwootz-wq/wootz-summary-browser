@@ -14,11 +14,20 @@ const SHEET_ID = process.env.GOOGLE_SHEET_ID;
 const GOOGLE_SERVICE_ACCOUNT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
 const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n');
 
+// Glide API credentials
+const GLIDE_API_TOKEN = process.env.GLIDE_API_TOKEN;
+const GLIDE_APP_ID = process.env.GLIDE_APP_ID;
+const GLIDE_TABLE_NAME = process.env.GLIDE_TABLE_NAME;
+
 // Validate environment variables on startup
 if (!OPENAI_API_KEY || !SHEET_ID || !GOOGLE_SERVICE_ACCOUNT_EMAIL || !GOOGLE_PRIVATE_KEY) {
   console.error('❌ Missing required environment variables!');
   console.error('Required: OPENAI_API_KEY, GOOGLE_SHEET_ID, GOOGLE_SERVICE_ACCOUNT_EMAIL, GOOGLE_PRIVATE_KEY');
   process.exit(1);
+}
+
+if (!GLIDE_API_TOKEN || !GLIDE_APP_ID || !GLIDE_TABLE_NAME) {
+  console.warn('⚠️ Glide API credentials missing. Summary will not auto-update in Glide table.');
 }
 
 // Initialize OpenAI
@@ -56,7 +65,6 @@ async function getPreviousSummaries(projectId, limit = 5) {
       return [];
     }
     
-    // Filter by projectId and get last 'limit' entries
     const projectRows = rows
       .filter(row => {
         const rowProjectId = row.get('ProjectID');
@@ -82,8 +90,6 @@ async function saveSummary(projectId, summary, keyChanges, previousContext, allD
   try {
     const doc = await getSheetDoc();
     const sheet = doc.sheetsByIndex[0];
-    
-    // Store all input data as JSON for future reference
     const dataSnapshot = JSON.stringify(allData);
     
     await sheet.addRow({
@@ -125,36 +131,80 @@ async function saveSummary(projectId, summary, keyChanges, previousContext, allD
   }
 }
 
-// Function to build structured input data for the new prompt
+// Function to update Glide table with AI summary
+async function updateGlideTable(rowID, summary) {
+  if (!GLIDE_API_TOKEN || !GLIDE_APP_ID || !GLIDE_TABLE_NAME) {
+    console.log('⚠️ Skipping Glide update - credentials not configured');
+    return false;
+  }
+
+  try {
+    console.log(`📤 Updating Glide table for Row ID: ${rowID}`);
+    
+    const response = await fetch('https://api.glideapp.io/api/function/mutateTables', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${GLIDE_API_TOKEN}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        appID: GLIDE_APP_ID,
+        mutations: [
+          {
+            kind: 'set-columns-in-row',
+            tableName: GLIDE_TABLE_NAME,
+            columnValues: {
+              'Gn4HH': summary  // AI Project summary column
+            },
+            rowID: rowID
+          }
+        ]
+      })
+    });
+
+    const result = await response.json();
+    
+    if (response.ok) {
+      console.log('✅ Glide table updated successfully');
+      return true;
+    } else {
+      console.error('❌ Glide API error:', result);
+      return false;
+    }
+  } catch (error) {
+    console.error('❌ Error updating Glide table:', error.message);
+    return false;
+  }
+}
+
+// Function to build structured input data
 function buildProjectData(params) {
   const data = {
     rowId: params.rowID || params['Row ID'] || params.rowId || 'Not provided',
-    projectName: params.projectName || params['Project name'] || 'Not provided',
-    partNumber: params.partNumber || params['Part number'] || 'Not provided',
-    partName: params.partName || params['Part name'] || 'Not provided',
+    projectName: params.projectName || params['Project name'] || params['5DWpY'] || 'Not provided',
+    partNumber: params.partNumber || params['Part number'] || params['Name'] || 'Not provided',
+    partName: params.partName || params['Part name'] || params['Mzfxa'] || 'Not provided',
     checkins: params.checkins || params.Checkins || 'No check-ins recorded',
     updates: params.updates || params.Updates || 'No updates provided',
     processes: params.processes || params.Processes || 'No processes listed',
-    bo: params.bo || params.BO || 'No bill of operations provided',
-    rm: params.rm || params.RM || 'No raw materials listed',
-    dispatchDate: params.dispatchDate || params['Dispatch date'] || 'Not specified',
-    vendorPOC: params.vendorPOC || params['Vendor POC'] || 'Not specified'
+    bo: params.bo || params.BO || params['2YvCK'] || 'No bill of operations provided',
+    rm: params.rm || params.RM || params['Mgpag'] || 'No raw materials listed',
+    dispatchDate: params.dispatchDate || params['Dispatch date'] || params['QNggY'] || 'Not specified',
+    vendorPOC: params.vendorPOC || params['Vendor POC'] || params['PHOD2'] || 'Not specified'
   };
   
   return data;
 }
 
-// Core logic function (shared between GET and POST)
+// Core logic function
 async function generateSummaryLogic(params, startTime) {
-  // Get projectId from various possible field names
-  const projectId = params.projectId || 
+  const projectId = params.rowID || 
+                    params['Row ID'] ||
+                    params.projectId || 
                     params.projectid || 
                     params.ProjectID || 
-                    params.rowID || 
                     params.RowID ||
-                    params.rowId ||
-                    params.row_id ||
-                    params['Row ID'];
+                    params.rowId;
   
   if (!projectId) {
     console.log('❌ Missing projectId/rowId');
@@ -168,13 +218,9 @@ async function generateSummaryLogic(params, startTime) {
     };
   }
   
-  // Build structured project data
   const projectData = buildProjectData(params);
-  
-  // Get previous summaries
   const previousSummaries = await getPreviousSummaries(projectId, 3);
   
-  // Build previous context
   let previousContext = 'No previous analysis available for this project.';
   if (previousSummaries.length > 0) {
     previousContext = `Previous Assessments (Last ${previousSummaries.length}):\n\n` + 
@@ -184,7 +230,6 @@ async function generateSummaryLogic(params, startTime) {
       }).join('\n');
   }
   
-  // Create the new structured prompt
   const prompt = `You are a project management analyst evaluating a manufacturing assembly project for Wootz.Work which deals in B2B exports high quality and high precision equipment across industries. Analyze the provided data and generate a concise, easy-to-read status report focused on schedule and scope.
 
 **INPUT DATA:**
@@ -272,7 +317,6 @@ Only use information present in the provided data. If you cannot make a confiden
 
   console.log('🤖 Calling OpenAI API with new prompt structure...');
   
-  // Call OpenAI with timeout
   const completion = await Promise.race([
     openai.chat.completions.create({
       model: 'gpt-4o-mini',
@@ -288,7 +332,6 @@ Only use information present in the provided data. If you cannot make a confiden
   const summary = completion.choices[0].message.content;
   console.log('✅ Summary generated successfully');
   
-  // Extract key changes from the structured output
   const scheduleMatch = summary.match(/\*\*Schedule:\*\*\s*\[(.*?)\]/);
   const scopeMatch = summary.match(/\*\*Scope Completion:\*\*\s*\[(.*?)\]/);
   
@@ -307,6 +350,9 @@ Only use information present in the provided data. If you cannot make a confiden
     params
   );
   
+  // Update Glide table with the summary
+  const glideUpdateSuccess = await updateGlideTable(projectId, summary);
+  
   const executionTime = Date.now() - startTime;
   console.log(`⏱️ Total execution time: ${executionTime}ms`);
   
@@ -320,6 +366,7 @@ Only use information present in the provided data. If you cannot make a confiden
       metadata: {
         previousSummariesCount: previousSummaries.length,
         savedToSheet: saveSuccess,
+        savedToGlide: glideUpdateSuccess,
         executionTimeMs: executionTime,
         timestamp: new Date().toISOString()
       }
@@ -327,7 +374,7 @@ Only use information present in the provided data. If you cannot make a confiden
   };
 }
 
-// GET endpoint (for browser/Open Link)
+// GET endpoint
 app.get('/generate-summary', async (req, res) => {
   const startTime = Date.now();
   
@@ -354,7 +401,7 @@ app.get('/generate-summary', async (req, res) => {
   }
 });
 
-// POST endpoint (for Glide webhook)
+// POST endpoint
 app.post('/generate-summary', async (req, res) => {
   const startTime = Date.now();
   
@@ -387,6 +434,7 @@ app.get('/health', async (req, res) => {
     const doc = await getSheetDoc();
     const sheetConnected = !!doc;
     const openaiConnected = !!OPENAI_API_KEY && OPENAI_API_KEY.startsWith('sk-');
+    const glideConfigured = !!(GLIDE_API_TOKEN && GLIDE_APP_ID && GLIDE_TABLE_NAME);
     
     res.json({ 
       status: 'ok',
@@ -394,9 +442,10 @@ app.get('/health', async (req, res) => {
       timestamp: new Date().toISOString(),
       connections: {
         googleSheets: sheetConnected ? '✅ Connected' : '❌ Failed',
-        openAI: openaiConnected ? '✅ Configured' : '❌ Not configured'
+        openAI: openaiConnected ? '✅ Configured' : '❌ Not configured',
+        glideAPI: glideConfigured ? '✅ Configured' : '⚠️ Not configured (optional)'
       },
-      version: '3.0.0'
+      version: '3.1.0'
     });
   } catch (error) {
     res.status(500).json({
@@ -411,27 +460,13 @@ app.get('/health', async (req, res) => {
 app.get('/', (req, res) => {
   res.json({ 
     message: '🚀 Wootz Summary API is running',
-    version: '3.0.0',
+    version: '3.1.0',
+    features: ['OpenAI Analysis', 'Google Sheets Storage', 'Glide Table Auto-Update'],
     endpoints: {
       generateSummary: {
         path: '/generate-summary',
         methods: ['GET', 'POST'],
-        requiredParams: {
-          rowID: 'Project identifier',
-          dispatchDate: 'Target dispatch date (recommended for schedule analysis)'
-        },
-        optionalParams: {
-          projectName: 'Project name',
-          partNumber: 'Part number',
-          partName: 'Part name',
-          checkins: 'Quality check-in data',
-          updates: 'Project updates',
-          processes: 'Manufacturing processes list',
-          BO: 'Bill of operations/boughtouts',
-          RM: 'Raw materials list',
-          vendorPOC: 'Vendor point of contact'
-        },
-        glideWebhook: 'Use POST method, map Glide columns to request body fields'
+        description: 'Generate project analysis and auto-update Glide table'
       },
       health: {
         path: '/health',
@@ -439,7 +474,6 @@ app.get('/', (req, res) => {
         description: 'Check API health and connections'
       }
     },
-    documentation: 'Manufacturing project analysis system. Provides schedule/scope assessment with strengths, weaknesses, opportunities, and threats analysis.',
     timestamp: new Date().toISOString()
   });
 });
@@ -467,10 +501,10 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`
 ╔═══════════════════════════════════════╗
-║   🚀 Wootz Summary API v3.0.0         ║
+║   🚀 Wootz Summary API v3.1.0         ║
 ║   📡 Server running on port ${PORT}       ║
 ║   🌐 Environment: ${process.env.NODE_ENV || 'production'}      ║
-║   📋 Project Management Analysis      ║
+║   📋 Auto-updates Glide table         ║
 ╚═══════════════════════════════════════╝
   `);
   console.log(`✅ Ready to accept requests!`);
