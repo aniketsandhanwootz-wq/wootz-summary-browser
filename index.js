@@ -269,9 +269,10 @@ Provide a brief, actionable assessment covering:
 **OUTPUT FORMAT:**
 Keep your response concise and structured as follows:
 
-**📊 Project Status Summary**
-**Schedule:** [On Track / At Risk / Delayed]
+**Project Status Summary**
+
 **Scope Completion:** [On Track / Needs Attention / Critical Gaps]
+
 [2-3 sentences summarizing the overall situation and biggest concern]
 
 **✅ Strengths (What's Going Well)**
