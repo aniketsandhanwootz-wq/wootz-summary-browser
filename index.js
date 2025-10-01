@@ -125,41 +125,36 @@ async function saveSummary(projectId, summary, keyChanges, previousContext, allD
   }
 }
 
-// Dynamic function to build project status from any parameters
-function buildProjectStatus(params) {
-  const excludeParams = ['projectid', 'projectId', 'ProjectID', 'rowid', 'rowId', 'RowID', 'row_id', 'Row ID'];
-  const statusLines = [];
+// Function to build structured input data for the new prompt
+function buildProjectData(params) {
+  const data = {
+    rowId: params.rowID || params['Row ID'] || params.rowId || 'Not provided',
+    projectName: params.projectName || params['Project name'] || 'Not provided',
+    partNumber: params.partNumber || params['Part number'] || 'Not provided',
+    partName: params.partName || params['Part name'] || 'Not provided',
+    checkins: params.checkins || params.Checkins || 'No check-ins recorded',
+    updates: params.updates || params.Updates || 'No updates provided',
+    processes: params.processes || params.Processes || 'No processes listed',
+    bo: params.bo || params.BO || 'No bill of operations provided',
+    rm: params.rm || params.RM || 'No raw materials listed',
+    dispatchDate: params.dispatchDate || params['Dispatch date'] || 'Not specified',
+    vendorPOC: params.vendorPOC || params['Vendor POC'] || 'Not specified'
+  };
   
-  for (const [key, value] of Object.entries(params)) {
-    if (!excludeParams.includes(key) && !excludeParams.includes(key.toLowerCase()) && value) {
-      const readableKey = key
-        .replace(/([A-Z])/g, ' $1')
-        .replace(/_/g, ' ')
-        .trim()
-        .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-        .join(' ');
-      
-      statusLines.push(`- ${readableKey}: ${value}`);
-    }
-  }
-  
-  return statusLines.length > 0 
-    ? statusLines.join('\n')
-    : '- No specific details provided';
+  return data;
 }
 
 // Core logic function (shared between GET and POST)
-async function generateSummaryLogic(data, startTime) {
+async function generateSummaryLogic(params, startTime) {
   // Get projectId from various possible field names
-  const projectId = data.projectId || 
-                    data.projectid || 
-                    data.ProjectID || 
-                    data.rowID || 
-                    data.RowID ||
-                    data.rowId ||
-                    data.row_id ||
-                    data['Row ID'];
+  const projectId = params.projectId || 
+                    params.projectid || 
+                    params.ProjectID || 
+                    params.rowID || 
+                    params.RowID ||
+                    params.rowId ||
+                    params.row_id ||
+                    params['Row ID'];
   
   if (!projectId) {
     console.log('❌ Missing projectId/rowId');
@@ -173,57 +168,117 @@ async function generateSummaryLogic(data, startTime) {
     };
   }
   
-  // Build dynamic project status
-  const projectStatus = buildProjectStatus(data);
+  // Build structured project data
+  const projectData = buildProjectData(params);
   
   // Get previous summaries
-  const previousSummaries = await getPreviousSummaries(projectId, 5);
+  const previousSummaries = await getPreviousSummaries(projectId, 3);
   
   // Build previous context
-  let previousContext = 'No previous history available.';
+  let previousContext = 'No previous analysis available for this project.';
   if (previousSummaries.length > 0) {
-    previousContext = previousSummaries.map((s, i) => {
-      const daysAgo = previousSummaries.length - i;
-      return `📅 Day -${daysAgo} (${s.timestamp}):\n${s.summary}`;
-    }).join('\n\n');
+    previousContext = `Previous Assessments (Last ${previousSummaries.length}):\n\n` + 
+      previousSummaries.map((s, i) => {
+        const daysAgo = previousSummaries.length - i;
+        return `Assessment -${daysAgo} (${s.timestamp}):\n${s.summary}\n`;
+      }).join('\n');
   }
   
-  // Create dynamic prompt
-  const prompt = `You are analyzing a manufacturing project for Wootz company. Generate a concise summary in Hindi-English mix (Hinglish) that managers can quickly understand.
+  // Create the new structured prompt
+  const prompt = `You are a project management analyst evaluating a manufacturing assembly project for Wootz.Work which deals in B2B exports high quality and high precision equipment across industries. Analyze the provided data and generate a concise, easy-to-read status report focused on schedule and scope.
 
-📊 PROJECT: ${projectId}
+**INPUT DATA:**
 
-📜 PREVIOUS CONTEXT (Last ${previousSummaries.length} ${previousSummaries.length === 1 ? 'day' : 'days'}):
+**Project Identifier:** ${projectData.rowId}
+**Project Name:** ${projectData.projectName}
+**Part Number:** ${projectData.partNumber}
+**Part Name:** ${projectData.partName}
+
+**Target Dispatch Date:** ${projectData.dispatchDate}
+**Vendor POC:** ${projectData.vendorPOC}
+
+**Project Updates (chronological process updates with timestamps and contributors):**
+${projectData.updates}
+
+**Quality Check-ins (inspection findings, issues identified, and timestamps):**
+${projectData.checkins}
+
+**Processes List (required manufacturing processes with parameters and drawing numbers):**
+${projectData.processes}
+
+**Raw Materials List (list of raw materials with dimensions):**
+${projectData.rm}
+
+**Boughtouts List (list of boughtouts to be purchased and fitted in assembly):**
+${projectData.bo}
+
+**PREVIOUS ANALYSIS CONTEXT:**
 ${previousContext}
 
-📋 CURRENT PROJECT STATUS:
-${projectStatus}
+**YOUR TASK:**
+Provide a brief, actionable assessment covering:
+1. Are we on schedule to meet the dispatch date?
+2. Is the scope (processes, materials, quality) on track?
+3. What are the key risks and opportunities?
 
-🎯 Generate a clear summary with:
-1. **Aaj ka Progress**: What happened today compared to previous days
-2. **Current Status**: Overall project health aur state
-3. **⚠️ Issues/Blockers**: Any problems jo immediate attention chahte hain
-4. **⏭️ Next Steps**: Kya karna hai aage
+**OUTPUT FORMAT:**
+Keep your response concise and structured as follows:
 
-Style Guidelines:
-- Keep it concise (max 250 words)
-- Use bullet points for clarity
-- Mix Hindi-English naturally (Hinglish)
-- Highlight critical issues with emojis (🔴 for urgent, ⚠️ for important)
-- Be specific about numbers, dates, percentages when available
-- If there's no previous history, focus more on current status and next steps
+**📊 Project Status Summary**
+**Schedule:** [On Track / At Risk / Delayed]
+**Scope Completion:** [On Track / Needs Attention / Critical Gaps]
+[2-3 sentences summarizing the overall situation and biggest concern]
 
-Generate the summary now:`;
+**✅ Strengths (What's Going Well)**
+* [Bullet point 1 - be specific with data]
+* [Bullet point 2]
+* [Bullet point 3 - only if relevant]
 
-  console.log('🤖 Calling OpenAI API...');
+**⚠️ Weaknesses (Internal Issues Causing Delays)**
+* [Bullet point 1 - be specific about the gap]
+* [Bullet point 2]
+* [Bullet point 3 - only if relevant]
+For example, if there are any blindspots that we are missing or repeating any mistakes again and again
+
+**🎯 Opportunities (Ways to Accelerate)**
+* [Bullet point 1 - or state "None identified" if no data supports this]
+* [Bullet point 2 - only if relevant]
+
+**🚨 Threats (External Risks to Timeline)**
+* [Bullet point 1 - focus on timeline risks]
+* [Bullet point 2 - only if relevant]
+
+**🔥 Critical Actions Needed**
+1. **[Action 1]** - [One line explaining why] (Owner: [Name if known])
+2. **[Action 2]** - [One line explaining why]
+3. **[Action 3]** - Only if critical
+
+**IMPORTANT GUIDELINES:**
+* **Be concise**: Maximum 2-3 bullet points per section
+* **Be specific**: Use actual dates, names, and numbers from the data
+* **Skip sections** if there's no relevant data (write "None identified from available data")
+* **Prioritize timeline impact**: Focus on what affects the dispatch date most
+* **No fluff**: Every sentence should add value
+* **Highlight patterns**: If multiple check-ins show the same issue (e.g., paint defects), group them
+* **Call out blockers**: Clearly identify what's stopping progress (payments, approvals, quality issues)
+
+**DATA FOCUS:**
+* Recent updates matter most for schedule assessment
+* Quality check-in frequency and severity indicate scope risks
+* Payment/approval mentions are red flags
+* Process completion vs. time remaining is key
+
+Only use information present in the provided data. If you cannot make a confident assessment due to limited data, state that clearly.`;
+
+  console.log('🤖 Calling OpenAI API with new prompt structure...');
   
   // Call OpenAI with timeout
   const completion = await Promise.race([
     openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [{ role: 'user', content: prompt }],
-      temperature: 0.7,
-      max_tokens: 600
+      temperature: 0.5,
+      max_tokens: 1000
     }),
     new Promise((_, reject) => 
       setTimeout(() => reject(new Error('OpenAI API timeout')), 30000)
@@ -233,24 +288,15 @@ Generate the summary now:`;
   const summary = completion.choices[0].message.content;
   console.log('✅ Summary generated successfully');
   
-  // Extract key changes
-  const keyChangesKeywords = [
-    'Progress', 'Changed', 'New', 'Updated', 'Completed', 
-    'Started', 'Received', 'Approved', 'Issue', 'Blocker',
-    'प्रगति', 'बदलाव', 'नया', 'पूरा'
-  ];
+  // Extract key changes from the structured output
+  const scheduleMatch = summary.match(/\*\*Schedule:\*\*\s*\[(.*?)\]/);
+  const scopeMatch = summary.match(/\*\*Scope Completion:\*\*\s*\[(.*?)\]/);
   
-  const keyChanges = summary
-    .split('\n')
-    .filter(line => 
-      keyChangesKeywords.some(keyword => 
-        line.toLowerCase().includes(keyword.toLowerCase())
-      )
-    )
-    .map(line => line.replace(/^[•\-*]\s*/, '').trim())
-    .filter(line => line.length > 10)
-    .slice(0, 3)
-    .join(' | ') || 'No major changes detected';
+  const keyChanges = [
+    scheduleMatch ? `Schedule: ${scheduleMatch[1]}` : '',
+    scopeMatch ? `Scope: ${scopeMatch[1]}` : '',
+    `Analysis generated at ${new Date().toLocaleString()}`
+  ].filter(Boolean).join(' | ');
   
   // Save to Google Sheets
   const saveSuccess = await saveSummary(
@@ -258,7 +304,7 @@ Generate the summary now:`;
     summary, 
     keyChanges, 
     previousContext,
-    data
+    params
   );
   
   const executionTime = Date.now() - startTime;
@@ -350,7 +396,7 @@ app.get('/health', async (req, res) => {
         googleSheets: sheetConnected ? '✅ Connected' : '❌ Failed',
         openAI: openaiConnected ? '✅ Configured' : '❌ Not configured'
       },
-      version: '2.2.0'
+      version: '3.0.0'
     });
   } catch (error) {
     res.status(500).json({
@@ -365,16 +411,27 @@ app.get('/health', async (req, res) => {
 app.get('/', (req, res) => {
   res.json({ 
     message: '🚀 Wootz Summary API is running',
-    version: '2.2.0',
+    version: '3.0.0',
     endpoints: {
       generateSummary: {
         path: '/generate-summary',
         methods: ['GET', 'POST'],
-        requiredParams: ['projectId or rowID'],
-        optionalParams: 'Any additional parameters (flexible)',
-        getExample: 'GET /generate-summary?rowID=123&status=Testing',
-        postExample: 'POST /generate-summary with JSON body: {"rowID": "123", "status": "Testing"}',
-        glideWebhook: 'Use POST method, add fields to request body'
+        requiredParams: {
+          rowID: 'Project identifier',
+          dispatchDate: 'Target dispatch date (recommended for schedule analysis)'
+        },
+        optionalParams: {
+          projectName: 'Project name',
+          partNumber: 'Part number',
+          partName: 'Part name',
+          checkins: 'Quality check-in data',
+          updates: 'Project updates',
+          processes: 'Manufacturing processes list',
+          BO: 'Bill of operations/boughtouts',
+          RM: 'Raw materials list',
+          vendorPOC: 'Vendor point of contact'
+        },
+        glideWebhook: 'Use POST method, map Glide columns to request body fields'
       },
       health: {
         path: '/health',
@@ -382,7 +439,7 @@ app.get('/', (req, res) => {
         description: 'Check API health and connections'
       }
     },
-    documentation: 'Supports both GET (URL params) and POST (request body). Perfect for Glide webhooks.',
+    documentation: 'Manufacturing project analysis system. Provides schedule/scope assessment with strengths, weaknesses, opportunities, and threats analysis.',
     timestamp: new Date().toISOString()
   });
 });
@@ -410,10 +467,10 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`
 ╔═══════════════════════════════════════╗
-║   🚀 Wootz Summary API v2.2.0         ║
+║   🚀 Wootz Summary API v3.0.0         ║
 ║   📡 Server running on port ${PORT}       ║
 ║   🌐 Environment: ${process.env.NODE_ENV || 'production'}      ║
-║   🔄 Supports GET & POST requests     ║
+║   📋 Project Management Analysis      ║
 ╚═══════════════════════════════════════╝
   `);
   console.log(`✅ Ready to accept requests!`);
