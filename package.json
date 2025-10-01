@@ -1,13 +1,13 @@
 {
   "name": "wootz-summary-api",
-  "version": "2.0.0",
-  "description": "Manufacturing project summary generator - Dynamic and flexible",
+  "version": "2.2.0",
+  "description": "Manufacturing project summary generator - Supports GET & POST for Glide webhooks",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
     "dev": "node index.js"
   },
-  "keywords": ["wootz", "manufacturing", "summary", "api", "openai"],
+  "keywords": ["wootz", "manufacturing", "summary", "api", "openai", "webhook", "glide"],
   "author": "Wootz Team",
   "license": "MIT",
   "dependencies": {
