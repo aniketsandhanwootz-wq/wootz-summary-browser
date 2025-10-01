@@ -1,13 +1,13 @@
 {
   "name": "wootz-summary-api",
-  "version": "2.2.0",
-  "description": "Manufacturing project summary generator - Supports GET & POST for Glide webhooks",
+  "version": "3.0.0",
+  "description": "Manufacturing project management analysis - Schedule & Scope assessment with SWOT analysis",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
     "dev": "node index.js"
   },
-  "keywords": ["wootz", "manufacturing", "summary", "api", "openai", "webhook", "glide"],
+  "keywords": ["wootz", "manufacturing", "project-management", "swot-analysis", "api", "openai", "webhook", "glide"],
   "author": "Wootz Team",
   "license": "MIT",
   "dependencies": {
