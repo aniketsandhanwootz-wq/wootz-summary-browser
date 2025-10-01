@@ -168,7 +168,8 @@ app.get('/generate-summary', async (req, res) => {
                       req.query.rowID || 
                       req.query.RowID ||
                       req.query.rowId ||
-                      req.query.row_id;
+                      req.query.row_id ||
+                      req.query['Row ID'];
     
     if (!projectId) {
       console.log('❌ Missing projectId/rowId');
