@@ -334,12 +334,10 @@ Only use information present in the provided data. If you cannot make a confiden
   const summary = completion.choices[0].message.content;
   console.log('✅ Summary generated successfully');
   
-  const scheduleMatch = summary.match(/\*\*Schedule:\*\*\s*\[(.*?)\]/);
-  const scopeMatch = summary.match(/\*\*Scope Completion:\*\*\s*\[(.*?)\]/);
-  
+  const scopeMatch = summary.match(/\*\*Scope Completion:\*\*\s*(.+?)(?:\n|$)/);
+
   const keyChanges = [
-    scheduleMatch ? `Schedule: ${scheduleMatch[1]}` : '',
-    scopeMatch ? `Scope: ${scopeMatch[1]}` : '',
+    scopeMatch ? `Scope: ${scopeMatch[1].trim()}` : '',
     `Analysis generated at ${new Date().toLocaleString()}`
   ].filter(Boolean).join(' | ');
   
